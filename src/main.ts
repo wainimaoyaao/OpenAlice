@@ -24,8 +24,14 @@ import type { BrainExportState } from './extension/brain/index.js'
 import { createBrowserTools } from './extension/browser/index.js'
 import { SymbolIndex } from './openbb/equity/index.js'
 import { createEquityTools } from './extension/equity/index.js'
-import { getSDKExecutor, buildRouteMap, SDKEquityClient, SDKCryptoClient, SDKCurrencyClient, SDKNewsClient, SDKEconomyClient, SDKCommodityClient } from './openbb/sdk/index.js'
+import { getSDKExecutor, buildRouteMap, SDKEquityClient, SDKCryptoClient, SDKCurrencyClient, SDKNewsClient } from './openbb/sdk/index.js'
+import type { EquityClientLike, CryptoClientLike, CurrencyClientLike, NewsClientLike } from './openbb/sdk/types.js'
 import { buildSDKCredentials } from './openbb/credential-map.js'
+import { OpenBBEquityClient } from './openbb/equity/client.js'
+import { OpenBBCryptoClient } from './openbb/crypto/client.js'
+import { OpenBBCurrencyClient } from './openbb/currency/client.js'
+import { OpenBBNewsClient } from './openbb/news/client.js'
+import { startEmbeddedOpenBBServer } from './openbb/api-server.js'
 import { createMarketSearchTools } from './extension/market/index.js'
 import { createNewsTools } from './extension/news/index.js'
 import { createAnalysisTools } from './extension/analysis-kit/index.js'
@@ -215,18 +221,35 @@ async function main() {
   })
   await newsStore.init()
 
-  // ==================== OpenBB SDK Clients ====================
+  // ==================== OpenBB Clients ====================
 
   const { providers } = config.openbb
-  const executor = getSDKExecutor()
-  const routeMap = buildRouteMap()
-  const credentials = buildSDKCredentials(config.openbb.providerKeys)
-  const equityClient = new SDKEquityClient(executor, 'equity', providers.equity, credentials, routeMap)
-  const cryptoClient = new SDKCryptoClient(executor, 'crypto', providers.crypto, credentials, routeMap)
-  const currencyClient = new SDKCurrencyClient(executor, 'currency', providers.currency, credentials, routeMap)
-  const commodityClient = new SDKCommodityClient(executor, 'commodity', undefined, credentials, routeMap)
-  const economyClient = new SDKEconomyClient(executor, 'economy', undefined, credentials, routeMap)
-  const newsClient = new SDKNewsClient(executor, 'news', undefined, credentials, routeMap)
+
+  let equityClient: EquityClientLike
+  let cryptoClient: CryptoClientLike
+  let currencyClient: CurrencyClientLike
+  let newsClient: NewsClientLike
+
+  if (config.openbb.dataBackend === 'openbb') {
+    const url = config.openbb.apiUrl
+    const keys = config.openbb.providerKeys
+    equityClient = new OpenBBEquityClient(url, providers.equity, keys)
+    cryptoClient = new OpenBBCryptoClient(url, providers.crypto, keys)
+    currencyClient = new OpenBBCurrencyClient(url, providers.currency, keys)
+    newsClient = new OpenBBNewsClient(url, undefined, keys)
+  } else {
+    const executor = getSDKExecutor()
+    const routeMap = buildRouteMap()
+    const credentials = buildSDKCredentials(config.openbb.providerKeys)
+    equityClient = new SDKEquityClient(executor, 'equity', providers.equity, credentials, routeMap)
+    cryptoClient = new SDKCryptoClient(executor, 'crypto', providers.crypto, credentials, routeMap)
+    currencyClient = new SDKCurrencyClient(executor, 'currency', providers.currency, credentials, routeMap)
+    newsClient = new SDKNewsClient(executor, 'news', undefined, credentials, routeMap)
+  }
+
+  if (config.openbb.apiServer.enabled) {
+    startEmbeddedOpenBBServer(config.openbb.apiServer.port)
+  }
 
   // ==================== Equity Symbol Index ====================
 

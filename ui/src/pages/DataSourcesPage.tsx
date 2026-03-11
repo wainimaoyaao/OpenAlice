@@ -273,7 +273,9 @@ function MarketDataZone({ openbb, enabled, onToggle, onChange, onChangeImmediate
   const [testing, setTesting] = useState(false)
   const [testStatus, setTestStatus] = useState<'idle' | 'ok' | 'error'>('idle')
 
+  const dataBackend = (openbb.dataBackend as string) || 'sdk'
   const apiUrl = (openbb.apiUrl as string) || 'http://localhost:6900'
+  const apiServer = (openbb.apiServer as { enabled: boolean; port: number } | undefined) ?? { enabled: false, port: 6901 }
   const providers = (openbb.providers ?? {
     equity: 'yfinance', crypto: 'yfinance', currency: 'yfinance', newsCompany: 'yfinance', newsWorld: 'fmp',
   }) as Record<string, string>
@@ -313,34 +315,63 @@ function MarketDataZone({ openbb, enabled, onToggle, onChange, onChangeImmediate
       enabled={enabled}
       onToggle={onToggle}
     >
-      {/* Connection */}
+      {/* Backend selector */}
       <div>
-        <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wide mb-2">Connection</p>
-        <div className="flex items-center gap-2">
-          <input
-            className={`${inputClass} flex-1`}
-            value={apiUrl}
-            onChange={(e) => { onChange({ apiUrl: e.target.value }); setTestStatus('idle') }}
-            placeholder="http://localhost:6900"
-          />
-          <button
-            onClick={testConnection}
-            disabled={testing}
-            className={`shrink-0 border rounded-lg px-4 py-2 text-[13px] font-medium cursor-pointer transition-colors disabled:opacity-50 ${
-              testStatus === 'ok'
-                ? 'border-green text-green'
-                : testStatus === 'error'
-                  ? 'border-red text-red'
-                  : 'border-border text-text-muted hover:bg-bg-tertiary hover:text-text'
-            }`}
-          >
-            {testing ? 'Testing…' : testStatus === 'ok' ? 'Connected' : testStatus === 'error' ? 'Failed' : 'Test Connection'}
-          </button>
-          {testStatus !== 'idle' && (
-            <div className={`w-2 h-2 rounded-full shrink-0 ${testStatus === 'ok' ? 'bg-green' : 'bg-red'}`} />
-          )}
+        <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wide mb-2">Data Backend</p>
+        <div className="flex border border-border rounded-lg overflow-hidden w-fit">
+          {(['sdk', 'openbb'] as const).map((backend, i) => (
+            <button
+              key={backend}
+              onClick={() => { onChangeImmediate({ dataBackend: backend }); setTestStatus('idle') }}
+              className={`px-4 py-1.5 text-[12px] font-medium transition-colors cursor-pointer ${
+                i > 0 ? 'border-l border-border' : ''
+              } ${
+                dataBackend === backend
+                  ? 'bg-bg-tertiary text-text'
+                  : 'text-text-muted hover:text-text'
+              }`}
+            >
+              {backend === 'sdk' ? 'Internal SDK' : 'External OpenBB'}
+            </button>
+          ))}
         </div>
+        <p className="text-[11px] text-text-muted mt-1.5">
+          {dataBackend === 'sdk'
+            ? 'Uses the built-in TypeScript OpenBB engine. No external process required.'
+            : 'Connects to an external OpenBB HTTP server (Python sidecar or custom).'}
+        </p>
       </div>
+
+      {/* Connection — only shown for external OpenBB backend */}
+      {dataBackend === 'openbb' && (
+        <div className="border-t border-border pt-4 mt-2">
+          <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wide mb-2">Connection</p>
+          <div className="flex items-center gap-2">
+            <input
+              className={`${inputClass} flex-1`}
+              value={apiUrl}
+              onChange={(e) => { onChange({ apiUrl: e.target.value }); setTestStatus('idle') }}
+              placeholder="http://localhost:6900"
+            />
+            <button
+              onClick={testConnection}
+              disabled={testing}
+              className={`shrink-0 border rounded-lg px-4 py-2 text-[13px] font-medium cursor-pointer transition-colors disabled:opacity-50 ${
+                testStatus === 'ok'
+                  ? 'border-green text-green'
+                  : testStatus === 'error'
+                    ? 'border-red text-red'
+                    : 'border-border text-text-muted hover:bg-bg-tertiary hover:text-text'
+              }`}
+            >
+              {testing ? 'Testing…' : testStatus === 'ok' ? 'Connected' : testStatus === 'error' ? 'Failed' : 'Test Connection'}
+            </button>
+            {testStatus !== 'idle' && (
+              <div className={`w-2 h-2 rounded-full shrink-0 ${testStatus === 'ok' ? 'bg-green' : 'bg-red'}`} />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Asset providers + inline keys */}
       <AssetProviderGrid
@@ -349,6 +380,38 @@ function MarketDataZone({ openbb, enabled, onToggle, onChange, onChangeImmediate
         onProviderChange={handleProviderChange}
         onKeyChange={handleKeyChange}
       />
+
+      {/* Embedded API server */}
+      <div className="border-t border-border pt-4 mt-2">
+        <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wide mb-2">Embedded API Server</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <p className="text-[13px] text-text">Expose OpenBB HTTP API</p>
+            <p className="text-[11px] text-text-muted mt-0.5">
+              Start an OpenBB-compatible HTTP server at Alice startup. Other services can connect to{' '}
+              <span className="font-mono text-[10px]">http://localhost:{apiServer.port}</span>.
+            </p>
+            {apiServer.enabled && (
+              <div className="flex items-center gap-2 mt-2">
+                <label className="text-[11px] text-text-muted shrink-0">Port</label>
+                <input
+                  className={`${inputClass} w-24`}
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={apiServer.port}
+                  onChange={(e) => onChange({ apiServer: { ...apiServer, port: Number(e.target.value) || 6901 } })}
+                />
+              </div>
+            )}
+          </div>
+          <Toggle
+            size="sm"
+            checked={apiServer.enabled}
+            onChange={(v) => onChangeImmediate({ apiServer: { ...apiServer, enabled: v } })}
+          />
+        </div>
+      </div>
 
       {/* Utility/macro providers */}
       <UtilityProvidersSection
