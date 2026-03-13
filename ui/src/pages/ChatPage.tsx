@@ -1,21 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { api, type ToolCall, type StreamingToolCall } from '../api'
-import { chatApi } from '../api/chat'
+import { api } from '../api'
 import type { ChannelListItem } from '../api/channels'
-import { useSSE } from '../hooks/useSSE'
+import { useChat } from '../hooks/useChat'
 import { ChatMessage, ToolCallGroup, ThinkingIndicator, StreamingToolGroup } from '../components/ChatMessage'
 import { ChatInput } from '../components/ChatInput'
 import { ChannelConfigModal } from '../components/ChannelConfigModal'
-
-/** Unified display item for the message list. */
-type DisplayItem =
-  | { kind: 'text'; role: 'user' | 'assistant' | 'notification'; text: string; timestamp?: string | null; media?: Array<{ type: string; url: string }>; _id: number }
-  | { kind: 'tool_calls'; calls: ToolCall[]; timestamp?: string; _id: number }
-
-/** Interleaved streaming segment — preserves text/tool arrival order. */
-type StreamSegment =
-  | { kind: 'text'; text: string }
-  | { kind: 'tools'; tools: StreamingToolCall[] }
 
 interface ChatPageProps {
   onSSEStatus?: (connected: boolean) => void
@@ -24,12 +13,13 @@ interface ChatPageProps {
 export function ChatPage({ onSSEStatus }: ChatPageProps) {
   const [channels, setChannels] = useState<ChannelListItem[]>([{ id: 'default', label: 'Alice' }])
   const [activeChannel, setActiveChannel] = useState('default')
-  const [messages, setMessages] = useState<DisplayItem[]>([])
-  const [isWaiting, setIsWaiting] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [newMsgCount, setNewMsgCount] = useState(0)
-  const [streamSegments, setStreamSegments] = useState<StreamSegment[]>([])
-  const abortRef = useRef<AbortController | null>(null)
+
+  const { messages, streamSegments, isWaiting, send, abort } = useChat({
+    channel: activeChannel,
+    onSSEStatus: activeChannel === 'default' ? onSSEStatus : undefined,
+  })
 
   // Popover state
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -40,12 +30,9 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
   const [editingChannel, setEditingChannel] = useState<ChannelListItem | null>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
 
-  const nextId = useRef(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const userScrolledUp = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const activeChannelRef = useRef(activeChannel)
-  activeChannelRef.current = activeChannel
 
   const isOnSubChannel = activeChannel !== 'default'
   const subChannels = channels.filter((ch) => ch.id !== 'default')
@@ -94,133 +81,10 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
     api.channels.list().then(({ channels: ch }) => setChannels(ch)).catch(() => {})
   }, [])
 
-  // Load chat history when active channel changes
+  // Cleanup abort on unmount
   useEffect(() => {
-    const channel = activeChannel === 'default' ? undefined : activeChannel
-    api.chat.history(100, channel).then(({ messages: msgs }) => {
-      setMessages(msgs.map((m): DisplayItem => {
-        if (m.kind === 'text' && m.metadata?.kind === 'notification') {
-          return { ...m, role: 'notification', _id: nextId.current++ }
-        }
-        return { ...m, _id: nextId.current++ }
-      }))
-    }).catch((err) => {
-      console.warn('Failed to load history:', err)
-    })
-  }, [activeChannel])
-
-  // SSE for push notifications only (heartbeat, cron, multi-tab sync)
-  const sseChannel = activeChannel === 'default' ? undefined : activeChannel
-  useSSE({
-    url: sseChannel ? `/api/chat/events?channel=${encodeURIComponent(sseChannel)}` : '/api/chat/events',
-    onMessage: (data) => {
-      if (data.type === 'message' && data.text) {
-        const role = data.kind === 'message' ? 'assistant' : 'notification'
-        setMessages((prev) => [
-          ...prev,
-          { kind: 'text', role, text: data.text, media: data.media, _id: nextId.current++ },
-        ])
-        if (userScrolledUp.current) {
-          setNewMsgCount((c) => c + 1)
-        }
-      }
-    },
-    onStatus: activeChannel === 'default' ? onSSEStatus : undefined,
-  })
-
-  // Abort streaming on unmount
-  useEffect(() => {
-    return () => { abortRef.current?.abort() }
-  }, [])
-
-  // Send message — streams events directly from POST response (no SSE dependency)
-  const handleSend = useCallback(async (text: string) => {
-    setStreamSegments([])
-    setMessages((prev) => [...prev, { kind: 'text', role: 'user', text, _id: nextId.current++ }])
-    setIsWaiting(true)
-
-    const abort = new AbortController()
-    abortRef.current = abort
-
-    try {
-      const channel = activeChannelRef.current === 'default' ? undefined : activeChannelRef.current
-      let finalText = ''
-      let finalMedia: Array<{ type: string; url: string }> | undefined
-      const segments: StreamSegment[] = []
-
-      for await (const event of chatApi.sendStreaming(text, channel, abort.signal)) {
-        if (event.type === 'stream') {
-          const ev = event.event
-          if (ev.type === 'tool_use') {
-            const last = segments[segments.length - 1]
-            if (last?.kind === 'tools') {
-              last.tools.push({ id: ev.id, name: ev.name, input: ev.input, status: 'running' })
-            } else {
-              segments.push({ kind: 'tools', tools: [{ id: ev.id, name: ev.name, input: ev.input, status: 'running' }] })
-            }
-            setStreamSegments([...segments])
-          } else if (ev.type === 'tool_result') {
-            for (const seg of segments) {
-              if (seg.kind === 'tools') {
-                const t = seg.tools.find((tool) => tool.id === ev.tool_use_id)
-                if (t) { t.status = 'done'; t.result = ev.content; break }
-              }
-            }
-            setStreamSegments([...segments])
-          } else if (ev.type === 'text') {
-            const last = segments[segments.length - 1]
-            if (last?.kind === 'text') {
-              last.text += ev.text
-            } else {
-              segments.push({ kind: 'text', text: ev.text })
-            }
-            setStreamSegments([...segments])
-          }
-        } else if (event.type === 'done') {
-          finalText = event.text
-          finalMedia = event.media?.length ? event.media : undefined
-        }
-      }
-
-      // Stream complete — finalize messages
-      setStreamSegments([])
-
-      if (finalText) {
-        // Collect all tools across segments for the final tool_calls display item
-        const allTools = segments.flatMap((s) => s.kind === 'tools' ? s.tools : [])
-        setMessages((prev) => {
-          const next = [...prev]
-          if (allTools.length > 0) {
-            next.push({
-              kind: 'tool_calls',
-              calls: allTools.map((t) => ({
-                name: t.name,
-                input: typeof t.input === 'string' ? t.input : JSON.stringify(t.input ?? ''),
-                result: t.result,
-              })),
-              _id: nextId.current++,
-            })
-          }
-          next.push({ kind: 'text', role: 'assistant', text: finalText, media: finalMedia, _id: nextId.current++ })
-          return next
-        })
-        if (userScrolledUp.current) {
-          setNewMsgCount((c) => c + 1)
-        }
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      setStreamSegments([])
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      setMessages((prev) => [
-        ...prev,
-        { kind: 'text', role: 'notification', text: `Error: ${msg}`, _id: nextId.current++ },
-      ])
-    } finally {
-      setIsWaiting(false)
-      abortRef.current = null
-    }
-  }, [])
+    return () => { abort() }
+  }, [abort])
 
   const handleScrollToBottom = useCallback(() => {
     userScrolledUp.current = false
@@ -529,7 +393,7 @@ export function ChatPage({ onSSEStatus }: ChatPageProps) {
       )}
 
       {/* Input */}
-      <ChatInput disabled={isWaiting} onSend={handleSend} />
+      <ChatInput disabled={isWaiting} onSend={send} />
 
       {/* Channel config modal */}
       {editingChannel && (
