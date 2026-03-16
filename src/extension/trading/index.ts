@@ -76,10 +76,10 @@ export { createWalletStateBridge } from './wallet-state-bridge.js'
 
 // Platform
 export type { IPlatform, PlatformCredentials } from './platform.js'
-export { CcxtPlatform } from './providers/ccxt/CcxtPlatform.js'
-export type { CcxtPlatformConfig } from './providers/ccxt/CcxtPlatform.js'
-export { AlpacaPlatform } from './providers/alpaca/AlpacaPlatform.js'
-export type { AlpacaPlatformConfig } from './providers/alpaca/AlpacaPlatform.js'
+export { CcxtPlatform } from './brokers/ccxt/CcxtPlatform.js'
+export type { CcxtPlatformConfig } from './brokers/ccxt/CcxtPlatform.js'
+export { AlpacaPlatform } from './brokers/alpaca/AlpacaPlatform.js'
+export type { AlpacaPlatformConfig } from './brokers/alpaca/AlpacaPlatform.js'
 export {
   createPlatformFromConfig,
   createAccountFromConfig,
@@ -90,8 +90,8 @@ export {
 export { createTradingTools } from './adapter.js'
 
 // Providers
-export { AlpacaBroker } from './providers/alpaca/index.js'
-export type { AlpacaBrokerConfig } from './providers/alpaca/index.js'
-export { CcxtBroker } from './providers/ccxt/index.js'
-export { createCcxtProviderTools } from './providers/ccxt/index.js'
-export type { CcxtBrokerConfig } from './providers/ccxt/index.js'
+export { AlpacaBroker } from './brokers/alpaca/index.js'
+export type { AlpacaBrokerConfig } from './brokers/alpaca/index.js'
+export { CcxtBroker } from './brokers/ccxt/index.js'
+export { createCcxtProviderTools } from './brokers/ccxt/index.js'
+export type { CcxtBrokerConfig } from './brokers/ccxt/index.js'

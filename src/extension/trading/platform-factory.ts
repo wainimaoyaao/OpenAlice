@@ -4,8 +4,8 @@
 
 import type { IPlatform, PlatformCredentials } from './platform.js'
 import type { IBroker } from './interfaces.js'
-import { CcxtPlatform } from './providers/ccxt/CcxtPlatform.js'
-import { AlpacaPlatform } from './providers/alpaca/AlpacaPlatform.js'
+import { CcxtPlatform } from './brokers/ccxt/CcxtPlatform.js'
+import { AlpacaPlatform } from './brokers/alpaca/AlpacaPlatform.js'
 import type { PlatformConfig, AccountConfig } from '../../core/config.js'
 
 /** Create an IPlatform from a parsed PlatformConfig. */
