@@ -119,18 +119,12 @@ async function main() {
   }
   validatePlatformRefs([...platformRegistry.values()], tradingConfig.accounts)
 
-  /** Initialize and register a single account. Returns true if successful. */
+  /** Initialize and register a single account. Always registers (offline if init fails). */
   async function initAccount(
     accountCfg: { id: string; platformId: string; guards: Array<{ type: string; options: Record<string, unknown> }> },
     platform: IPlatform,
   ): Promise<boolean> {
     const broker = createBrokerFromConfig(platform, accountCfg)
-    try {
-      await broker.init()
-    } catch (err) {
-      console.warn(`trading: ${accountCfg.id} init failed (non-fatal):`, err)
-      return false
-    }
     const savedState = await loadGitState(accountCfg.id)
     const filePath = gitFilePath(accountCfg.id)
     const uta = new UnifiedTradingAccount(broker, {
@@ -139,8 +133,17 @@ async function main() {
       onCommit: createGitPersister(filePath),
       platformId: accountCfg.platformId,
     })
+
+    try {
+      await broker.init()
+      console.log(`trading: ${uta.label} initialized`)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn(`trading: ${accountCfg.id} init failed, registered as offline: ${msg}`)
+      uta.markOffline(msg)
+    }
+
     accountManager.add(uta)
-    console.log(`trading: ${uta.label} initialized`)
     return true
   }
 
